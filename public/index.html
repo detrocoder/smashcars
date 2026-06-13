@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,height=device-height,initial-scale=1.0,maximum-scale=1.0,user-scalable=no,viewport-fit=cover">
+
+<title>SmashCars Extreme 3D</title>
+
+<style>
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+-webkit-tap-highlight-color:transparent;
+}
+
+html,body{
+width:100%;
+height:100%;
+overflow:hidden;
+background:#050510;
+font-family:Arial,sans-serif;
+touch-action:none;
+overscroll-behavior:none;
+}
+
+#game{
+position:fixed;
+inset:0;
+width:100vw;
+height:100vh;
+display:block;
+}
+
+#hud{
+position:fixed;
+top:10px;
+left:10px;
+right:10px;
+display:flex;
+justify-content:space-between;
+z-index:50;
+pointer-events:none;
+}
+
+.panel{
+background:rgba(0,0,0,.55);
+backdrop-filter:blur(10px);
+padding:10px;
+border-radius:14px;
+color:white;
+min-width:140px;
+border:1px solid rgba(255,255,255,.1);
+}
+
+.weaponSelect{
+margin-top:6px;
+display:flex;
+gap:5px;
+flex-wrap:wrap;
+pointer-events:auto;
+}
+
+.weaponBtn{
+background:#222;
+color:white;
+border:none;
+padding:5px 8px;
+border-radius:8px;
+font-size:11px;
+cursor:pointer;
+}
+
+.weaponBtn.active{
+background:#ff7b00;
+}
+
+#mobile{
+position:fixed;
+inset:0;
+z-index:100;
+pointer-events:none;
+}
+
+.pad{
+position:absolute;
+left:max(20px,env(safe-area-inset-left));
+bottom:max(20px,env(safe-area-inset-bottom));
+width:150px;
+height:150px;
+border-radius:50%;
+background:rgba(255,255,255,.06);
+border:2px solid rgba(255,255,255,.15);
+pointer-events:auto;
+}
+
+.knob{
+position:absolute;
+left:50%;
+top:50%;
+width:60px;
+height:60px;
+transform:translate(-50%,-50%);
+border-radius:50%;
+background:rgba(255,255,255,.25);
+}
+
+.fire{
+position:absolute;
+right:max(25px,env(safe-area-inset-right));
+bottom:max(25px,env(safe-area-inset-bottom));
+width:95px;
+height:95px;
+border-radius:50%;
+background:#ff3d00;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:28px;
+color:white;
+pointer-events:auto;
+box-shadow:0 0 25px rgba(255,61,0,.6);
+}
+
+.boost{
+position:absolute;
+right:max(135px,env(safe-area-inset-right));
+bottom:max(40px,env(safe-area-inset-bottom));
+width:70px;
+height:70px;
+border-radius:50%;
+background:#ffd000;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:22px;
+pointer-events:auto;
+}
+
+@media (pointer:fine){
+#mobile{
+display:none;
+}
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="hud">
+<div class="panel">
+<div>HP: <span id="hp">100</span></div>
+<div>Weapon: <span id="weaponName">Rocket</span></div>
+
+<div class="weaponSelect">
+<button class="weaponBtn active" data-w="rocket">Rocket</button>
+<button class="weaponBtn" data-w="mine">Mine</button>
+<button class="weaponBtn" data-w="teleport">Teleport</button>
+<button class="weaponBtn" data-w="invisible">Invisible</button>
+<button class="weaponBtn" data-w="cannon">Cannon</button>
+<button class="weaponBtn" data-w="surprise">???</button>
+</div>
+</div>
+
+<div class="panel">
+<div>EXTREME MODE</div>
+<div id="difficulty">Level 1</div>
+</div>
+</div>
+
+<div id="mobile">
+<div class="pad" id="pad">
+<div class="knob" id="knob"></div>
+</div>
+
+<div class="fire" id="fire">🔥</div>
+<div class="boost" id="boost">⚡</div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+
+function resize(){
+canvas.width=window.innerWidth;
+canvas.height=window.innerHeight;
+}
+resize();
+window.addEventListener("resize",resize);
+window.addEventListener("orientationchange",()=>setTimeout(resize,200));
+
+const WORLD_W=7000;
+const WORLD_H=7000;
+
+const camera={
+x:0,
+y:0,
+tilt:.55
+};
+
+const player={
+x:3500,
+y:3500,
+angle:0,
+speed:0,
+hp:100,
+weapon:"rocket",
+invisible:false
+};
+
+const keys={};
+
+const obstacles=[];
+
+function generateArena(){
+for(let i=0;i<140;i++){
+
+obstacles.push({
+x:Math.random()*WORLD_W,
+y:Math.random()*WORLD_H,
+w:120+Math.random()*220,
+h:120+Math.random()*220
+});
+
+}
+}
+generateArena();
+
+const mines=[];
+const projectiles=[];
+const teleporters=[];
+
+for(let i=0;i<10;i++){
+teleporters.push({
+x:Math.random()*WORLD_W,
+y:Math.random()*WORLD_H
+});
+}
+
+function project(wx,wy){
+
+const dx=wx-camera.x;
+const dy=wy-camera.y;
+
+return{
+x:canvas.width/2+dx,
+y:canvas.height/2+dy*camera.tilt
+};
+
+}
+
+function drawGrid(){
+
+ctx.strokeStyle="rgba(255,255,255,.03)";
+ctx.lineWidth=1;
+
+for(let x=0;x<WORLD_W;x+=200){
+
+const p1=project(x,0);
+const p2=project(x,WORLD_H);
+
+ctx.beginPath();
+ctx.moveTo(p1.x,p1.y);
+ctx.lineTo(p2.x,p2.y);
+ctx.stroke();
+}
+
+for(let y=0;y<WORLD_H;y+=200){
+
+const p1=project(0,y);
+const p2=project(WORLD_W,y);
+
+ctx.beginPath();
+ctx.moveTo(p1.x,p1.y);
+ctx.lineTo(p2.x,p2.y);
+ctx.stroke();
+}
+}
+
+function drawObstacle(o){
+
+const p=project(o.x,o.y);
+
+const w=o.w;
+const h=o.h*camera.tilt;
+const depth=35;
+
+ctx.fillStyle="#1d2b70";
+
+ctx.beginPath();
+ctx.moveTo(p.x,p.y);
+ctx.lineTo(p.x+w,p.y);
+ctx.lineTo(p.x+w,p.y+h);
+ctx.lineTo(p.x,p.y+h);
+ctx.fill();
+
+ctx.fillStyle="#3247b7";
+
+ctx.beginPath();
+ctx.moveTo(p.x,p.y);
+ctx.lineTo(p.x+depth,p.y-depth);
+ctx.lineTo(p.x+w+depth,p.y-depth);
+ctx.lineTo(p.x+w,p.y);
+ctx.fill();
+
+ctx.fillStyle="#12204f";
+
+ctx.beginPath();
+ctx.moveTo(p.x+w,p.y);
+ctx.lineTo(p.x+w+depth,p.y-depth);
+ctx.lineTo(p.x+w+depth,p.y+h-depth);
+ctx.lineTo(p.x+w,p.y+h);
+ctx.fill();
+}
+
+function drawCar(){
+
+const p=project(player.x,player.y);
+
+ctx.save();
+
+ctx.translate(p.x,p.y);
+
+ctx.scale(1,camera.tilt);
+
+ctx.rotate(player.angle);
+
+ctx.fillStyle="rgba(0,0,0,.4)";
+ctx.fillRect(-30,18,70,26);
+
+ctx.fillStyle=player.invisible?"rgba(255,255,255,.25)":"#ff3434";
+ctx.fillRect(-34,-18,68,36);
+
+ctx.fillStyle="#ff9d9d";
+ctx.fillRect(-10,-12,32,24);
+
+ctx.fillStyle="#111";
+ctx.fillRect(-25,-24,16,10);
+ctx.fillRect(10,-24,16,10);
+ctx.fillRect(-25,14,16,10);
+ctx.fillRect(10,14,16,10);
+
+ctx.fillStyle="#ffea00";
+ctx.fillRect(25,-5,20,10);
+
+ctx.restore();
+}
+
+function drawTeleporters(){
+
+teleporters.forEach(t=>{
+
+const p=project(t.x,t.y);
+
+ctx.beginPath();
+ctx.arc(p.x,p.y,28,0,Math.PI*2);
+
+const g=ctx.createRadialGradient(p.x,p.y,5,p.x,p.y,28);
+g.addColorStop(0,"#fff");
+g.addColorStop(.5,"#00f0ff");
+g.addColorStop(1,"rgba(0,240,255,0)");
+
+ctx.fillStyle=g;
+ctx.fill();
+
+});
+}
+
+function drawMines(){
+
+mines.forEach(m=>{
+
+const p=project(m.x,m.y);
+
+ctx.fillStyle="#ff0000";
+ctx.beginPath();
+ctx.arc(p.x,p.y,14,0,Math.PI*2);
+ctx.fill();
+
+});
+}
+
+function drawProjectiles(){
+
+projectiles.forEach(pr=>{
+
+pr.x+=Math.cos(pr.a)*pr.s;
+pr.y+=Math.sin(pr.a)*pr.s;
+
+const p=project(pr.x,pr.y);
+
+ctx.fillStyle=pr.c;
+
+ctx.beginPath();
+ctx.arc(p.x,p.y,10,0,Math.PI*2);
+ctx.fill();
+
+});
+}
+
+function update(){
+
+if(keys.w) player.speed=Math.min(player.speed+.2,8);
+else player.speed*=.94;
+
+if(keys.a) player.angle-=.05;
+if(keys.d) player.angle+=.05;
+
+player.x+=Math.cos(player.angle)*player.speed;
+player.y+=Math.sin(player.angle)*player.speed;
+
+player.x=Math.max(0,Math.min(WORLD_W,player.x));
+player.y=Math.max(0,Math.min(WORLD_H,player.y));
+
+camera.x=player.x;
+camera.y=player.y;
+
+teleporters.forEach(t=>{
+
+const dx=player.x-t.x;
+const dy=player.y-t.y;
+
+if(Math.hypot(dx,dy)<80){
+
+player.x=Math.random()*WORLD_W;
+player.y=Math.random()*WORLD_H;
+
+}
+
+});
+}
+
+function render(){
+
+ctx.clearRect(0,0,canvas.width,canvas.height);
+
+const bg=ctx.createLinearGradient(0,0,0,canvas.height);
+bg.addColorStop(0,"#0d1028");
+bg.addColorStop(1,"#050510");
+
+ctx.fillStyle=bg;
+ctx.fillRect(0,0,canvas.width,canvas.height);
+
+drawGrid();
+
+obstacles.forEach(drawObstacle);
+
+drawTeleporters();
+
+drawMines();
+
+drawProjectiles();
+
+drawCar();
+
+requestAnimationFrame(render);
+}
+
+setInterval(()=>{
+
+document.getElementById("difficulty").innerText=
+"Level "+(1+Math.floor(Date.now()/7000)%99);
+
+},500);
+
+function shoot(){
+
+if(player.weapon==="mine"){
+
+mines.push({
+x:player.x,
+y:player.y
+});
+
+return;
+}
+
+if(player.weapon==="teleport"){
+
+player.x+=Math.cos(player.angle)*800;
+player.y+=Math.sin(player.angle)*800;
+return;
+}
+
+if(player.weapon==="invisible"){
+
+player.invisible=true;
+
+setTimeout(()=>{
+player.invisible=false;
+},5000);
+
+return;
+}
+
+if(player.weapon==="surprise"){
+
+const all=["rocket","mine","teleport","invisible","cannon"];
+player.weapon=all[Math.floor(Math.random()*all.length)];
+document.getElementById("weaponName").innerText=player.weapon;
+}
+
+projectiles.push({
+x:player.x,
+y:player.y,
+a:player.angle,
+s:player.weapon==="cannon"?18:12,
+c:player.weapon==="cannon"?"#ffd000":"#ff6600"
+});
+
+}
+
+document.querySelectorAll(".weaponBtn").forEach(btn=>{
+
+btn.onclick=()=>{
+
+document.querySelectorAll(".weaponBtn").forEach(b=>b.classList.remove("active"));
+
+btn.classList.add("active");
+
+player.weapon=btn.dataset.w;
+
+document.getElementById("weaponName").innerText=player.weapon;
+
+};
+
+});
+
+document.addEventListener("keydown",e=>{
+
+keys[e.key.toLowerCase()]=true;
+
+if(e.code==="Space") shoot();
+
+});
+
+document.addEventListener("keyup",e=>{
+
+keys[e.key.toLowerCase()]=false;
+
+});
+
+document.getElementById("fire").addEventListener("touchstart",e=>{
+e.preventDefault();
+shoot();
+});
+
+const pad=document.getElementById("pad");
+const knob=document.getElementById("knob");
+
+let active=false;
+
+pad.addEventListener("touchstart",()=>active=true);
+
+document.addEventListener("touchend",()=>{
+
+active=false;
+
+knob.style.transform="translate(-50%,-50%)";
+
+keys.w=false;
+keys.a=false;
+keys.d=false;
+
+});
+
+document.addEventListener("touchmove",e=>{
+
+if(!active) return;
+
+const t=e.touches[0];
+
+const r=pad.getBoundingClientRect();
+
+const cx=r.left+r.width/2;
+const cy=r.top+r.height/2;
+
+const dx=t.clientX-cx;
+const dy=t.clientY-cy;
+
+const angle=Math.atan2(dy,dx);
+
+const dist=Math.min(Math.hypot(dx,dy),45);
+
+knob.style.transform=
+`translate(calc(-50% + ${Math.cos(angle)*dist}px),calc(-50% + ${Math.sin(angle)*dist}px))`;
+
+keys.w=true;
+
+if(dx>15){
+keys.d=true;
+keys.a=false;
+}else if(dx<-15){
+keys.a=true;
+keys.d=false;
+}else{
+keys.a=false;
+keys.d=false;
+}
+
+},{passive:false});
+
+update();
+
+setInterval(update,16);
+
+render();
+</script>
+
+</body>
+</html>
